@@ -99,3 +99,31 @@ Decision updates use a shared row mapper, typed service, and an isolated form. T
 - **Client reply drafts** (`/api/projects/[projectId]/replies`): after a human decision, AI drafts a short reply in a friendly or formal tone, using the decision note, the latest assessment, and any linked change order. It shares the daily AI allowance with assessments. Drafts are checked before saving: every number in a draft must already appear in the project data (no invented prices, hours, or dates), and internal markers are rejected. Drafts are saved; a draft written for an earlier decision is flagged. Nothing is ever sent.
 - **Decision log** (`/projects/[projectId]/report`): a printable report of requests, decisions, notes, AI evidence with page numbers, change orders with accepted totals, scope history, and the current scope. "Save as PDF" uses the browser's print dialog, so the PDF keeps selectable text.
 - Tests: `npm run test:workflow` (offline) and `npm run test:edit` (API; add `-- --fake-ai` only against a local dev server started with `SCOPECHECK_FAKE_AI=1`, which is ignored in production builds).
+
+## Supporting documents and retrieval (RAG)
+
+A project can hold up to 10 supporting documents (proposal, email thread, meeting notes, other; up to 200,000 characters each) next to the agreed scope. They are imported the same way as the scope (PDF/Word read in the browser, or a public link) and only their text is stored.
+
+**Design rule: the agreed scope is binding, documents are context.** The scope is always sent to the model in full; retrieval only ever applies to the supporting documents, so a missed chunk can never hide an exclusion clause. If a document contradicts the scope (an email promising excluded work), the model must answer "Needs clarification" and cite both.
+
+How an assessment is built (`src/lib/rag/assessment-context.ts`):
+
+1. **No documents** → the original scope-only path, unchanged.
+2. **Scope + documents ≤ 100,000 characters** (≈ 25k tokens) → everything in full. Nothing to miss, so no retrieval.
+3. **Larger** → hybrid retrieval over the documents, top 8 chunks:
+   - Chunking (`chunk.ts`): paragraph-packed chunks of ~1,200 characters that never cross a `[Page N]` marker, keep the nearest section heading, split long paragraphs by sentence, and repeat a short trailing paragraph as overlap.
+   - Keyword search: Postgres full-text (`tsvector` generated column, GIN index), OR-query of the request's terms, ranked by `ts_rank_cd`.
+   - Semantic search: `text-embedding-3-small` vectors in pgvector (`vector(1536)`, HNSW cosine index).
+   - Fusion: reciprocal rank fusion (k = 60), so the two scores never need calibrating against each other.
+
+Every quote the model returns names its source (`scope` or a chunk ref) and is checked **verbatim against that exact source**; one unsupported quote rejects the whole answer. A definitive decision still needs at least one quote from the agreed scope. The UI tags each quote as **Binding** (agreed scope) or **Context** (document title, page). Assessments store a fingerprint of the documents, so adding or deleting a document marks earlier assessments outdated.
+
+Failure modes are graceful: if embeddings are unavailable (no key, provider error, or the per-user daily budget `RAG_DAILY_EMBEDDING_TOKENS`, default 500k), a document is saved as keyword-searchable and re-embedded on a later assessment. `RAG_EMBEDDINGS=off` disables embeddings entirely.
+
+Checks:
+
+- `npm run test:rag`: offline unit tests (chunking, fusion, routing, quote-to-source validation).
+- `npm run test:documents`: API integration test against a local dev server started with `SCOPECHECK_FAKE_AI=1` (deterministic local embeddings and model stand-in; no OpenAI calls). It covers CRUD, ownership, CSRF, limits, both context modes, staleness, and cascades.
+- `npm run eval:retrieval`: retrieval eval (20 client requests → expected document section) using the production chunker and search SQL in a temporary schema that is rolled back. It reports recall@1/3/5/8 and MRR for keyword-only, vector-only, and hybrid. It runs offline by default. `-- --live` uses real embeddings (well under $0.001).
+
+Known limits: one query embedding per retrieval-mode assessment, counted under the assessment allowance; HNSW is filtered per project after the index scan, which is fine at this scale (pgvector ≥ 0.8 iterative scans would be the next step at large scale).

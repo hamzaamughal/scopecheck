@@ -13,6 +13,7 @@ export const API_ERRORS = {
   AI_NOT_CONFIGURED: { status: 503, message: "AI features are not configured on this server." },
   REPLY_FAILED: { status: 502, message: "Could not draft a reply. Please try again." },
   DECISION_REQUIRED: { status: 409, message: "Save your decision first. The reply is written from your decision." },
+  DOCUMENT_LIMIT_REACHED: { status: 409, message: "A project can have up to 10 supporting documents. Delete one before adding another." },
   NOT_FOUND: { status: 404, message: "The requested resource was not found." },
   INTERNAL_ERROR: { status: 500, message: "Something went wrong. Please try again." },
   DATABASE_UNAVAILABLE: { status: 503, message: "Could not connect to the database." },

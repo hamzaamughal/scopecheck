@@ -44,7 +44,7 @@ async function readDocx(file: File): Promise<string> {
   } catch { throw new ScopeImportError("This file could not be read as a Word document (.docx)."); }
 }
 
-export async function readScopeFile(file: File): Promise<ImportedScope> {
+export async function readScopeFile(file: File, maxChars?: number): Promise<ImportedScope> {
   if (file.size > MAX_FILE_BYTES) throw new ScopeImportError("This file is larger than 15 MB.");
   const name = file.name.toLowerCase();
   let text: string; let pageCount: number | undefined;
@@ -53,6 +53,6 @@ export async function readScopeFile(file: File): Promise<ImportedScope> {
   else if (name.endsWith(".doc")) throw new ScopeImportError("Old .doc files are not supported. Save it as .docx or PDF and try again.");
   else if (name.endsWith(".txt") || name.endsWith(".md") || file.type.startsWith("text/")) text = normalizeText(await file.text());
   else throw new ScopeImportError("Use a PDF, Word (.docx), TXT or Markdown file.");
-  assertImportable(text);
+  assertImportable(text, maxChars);
   return { text, label: file.name.slice(0, 300), pageCount, contentHash: await contentHash(text) };
 }

@@ -2,9 +2,8 @@ import { authorizeRequest } from "@/lib/auth-session";
 import { z } from "zod";
 import { getAssessmentSource, getSavedAssessment, saveAssessment, type AssessmentSource } from "@/lib/assessment-repository";
 import { apiError, apiSuccess } from "@/lib/api-response";
-import { ASSESSMENT_MODEL, assessRequest } from "@/lib/ai/assess-request";
+import { runAssessment, type AssessmentRun } from "@/lib/rag/assessment-context";
 import type { AssessRequestData } from "@/types/assessment";
-import type { Assessment } from "@/schemas/assessment";
 import { reserveAssessment } from "@/lib/assessment-usage";
 
 export const runtime = "nodejs";
@@ -44,7 +43,8 @@ export async function POST(
 
   if (!source) return apiError("NOT_FOUND");
 
-  if (!process.env.OPENAI_API_KEY) {
+  const fakeAi = process.env.SCOPECHECK_FAKE_AI === "1" && process.env.NODE_ENV !== "production";
+  if (!process.env.OPENAI_API_KEY && !fakeAi) {
     console.error("OPENAI_API_KEY is missing.");
     return apiError("INTERNAL_ERROR");
   }
@@ -56,14 +56,10 @@ export async function POST(
     return apiError("DATABASE_UNAVAILABLE");
   }
 
-  let assessment: Assessment;
+  // Scope only, or scope + supporting documents (in full, or the top chunks from hybrid search).
+  let run: AssessmentRun;
   try {
-    assessment = await assessRequest({
-      scope: source.scope,
-      title: source.title,
-      description: source.description,
-    });
-
+    run = await runAssessment(access.user.id, projectId, source);
   } catch (error) {
     console.error("Assessment failed.", {
       requestId,
@@ -74,7 +70,7 @@ export async function POST(
   }
 
   try {
-    const id = await saveAssessment(access.user.id, projectId, source, ASSESSMENT_MODEL, assessment);
+    const id = await saveAssessment(access.user.id, projectId, source, run.model, run.assessment, { documentsHash: run.documentsHash, context: run.context });
     const saved = await getSavedAssessment(access.user.id, projectId, requestId, id);
     if (!saved?.assessment) throw new Error("Saved assessment unavailable");
     return apiSuccess<AssessRequestData>({ requestId, assessment: saved.assessment }, 201);

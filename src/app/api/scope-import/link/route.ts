@@ -8,6 +8,7 @@ import { safeFetchText } from "@/lib/scope-import/safe-fetch";
 import { htmlToText } from "@/lib/scope-import/html-to-text";
 import { assertImportable, contentHash, normalizeText, ScopeImportError } from "@/lib/scope-import/normalize";
 import type { ImportLinkData } from "@/types/project";
+import { DOCUMENT_MAX_CHARS } from "@/schemas/documents";
 
 // Fetches a public link and returns its text as a preview. Nothing is saved here;
 // the user reviews the text and saves it through the normal project endpoints.
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
     const page = await safeFetchText(prepared.fetchUrl);
     const { title, text } = page.contentType.startsWith("text/plain") ? { title: "", text: normalizeText(page.body) } : htmlToText(page.body);
     if (prepared.hint && text.length < 300) throw new ScopeImportError(prepared.hint);
-    assertImportable(text);
+    assertImportable(text, parsed.data.purpose === "document" ? DOCUMENT_MAX_CHARS : undefined);
     if (parsed.data.projectId) {
       await db.query("UPDATE scope_sources SET last_checked_at = NOW() WHERE project_id = $1", [parsed.data.projectId]);
     }

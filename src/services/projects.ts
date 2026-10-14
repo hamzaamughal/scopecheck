@@ -21,6 +21,6 @@ export function deleteProject(projectId: string) {
   return apiRequest<DeleteProjectData>(projectUrl(projectId), { method: "DELETE" });
 }
 
-export function importLink(url: string, projectId?: string, signal?: AbortSignal) {
-  return apiRequest<ImportLinkData>("/api/scope-import/link", { ...json("POST", { url, ...(projectId ? { projectId } : {}) }), signal });
+export function importLink(url: string, projectId?: string, signal?: AbortSignal, purpose?: "document") {
+  return apiRequest<ImportLinkData>("/api/scope-import/link", { ...json("POST", { url, ...(projectId ? { projectId } : {}), ...(purpose ? { purpose } : {}) }), signal });
 }

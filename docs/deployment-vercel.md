@@ -37,6 +37,8 @@ Add every variable with the **Production** environment only. Preview deployments
 | `AUTH_EMAIL_FROM` | `ScopeCheck <noreply@scopecheck.hamzaabubakar.dev>` |
 | `OPENAI_API_KEY` | Your key. Set a monthly spend limit in the OpenAI dashboard too. |
 | `ASSESSMENT_DAILY_LIMIT` | Optional, default 10 |
+| `RAG_DAILY_EMBEDDING_TOKENS` | Optional, default 500000 (per user per day; ≈ $0.01 with text-embedding-3-small) |
+| `RAG_EMBEDDINGS` | Optional. `off` = keyword search only for supporting documents |
 
 Changing a variable needs a redeploy (Deployments → ⋯ → Redeploy).
 
@@ -75,6 +77,10 @@ Until the domain is verified, verification and reset emails only reach your own 
 - Database backups: confirm your Postgres provider keeps automatic backups or point-in-time restore, and how long it keeps them.
 - Error visibility: Vercel Logs for now. Add alerting later if real users arrive.
 - Local development currently uses the production database. After launch, create a separate development database or branch, point `.env.local` at it, and run `npm run db:migrate` there. A fresh database now builds correctly from the migrations.
+
+## Migration 008 (supporting documents)
+
+Migration 008 runs `CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public`. Neon (and Vercel Postgres) support pgvector. Run `npm run db:migrate`, then `npm run db:verify`, before deploying code that uses it.
 
 ## Production behaviour notes
 

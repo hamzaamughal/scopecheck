@@ -545,3 +545,27 @@ h1, h2, h3 { font-weight: 600; }
 .history-full .scope-copy { padding: 16px; }
 @media (max-width: 560px) { .history-list button { grid-template-columns: 36px 1fr; } .history-list button .small-muted { grid-column: 2; } }
 @media (max-width: 700px) { .detail-tabs { overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; } .detail-tabs button { white-space: nowrap; flex-shrink: 0; } }
+
+/* ---------- Supporting documents (RAG) ---------- */
+.documents-panel { max-width: 850px; margin: 0 auto 40px; }
+.doc-list { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; }
+.doc-row { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--background); }
+[data-theme="dark"] .doc-row { background: #191a22; }
+.doc-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.doc-main { display: grid; gap: 3px; text-align: left; background: transparent; border: 0; padding: 0; color: var(--foreground); min-width: 0; cursor: pointer; }
+.doc-main strong { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-main span { font-size: 12.5px; color: var(--muted); }
+.doc-main:hover strong { color: var(--accent); }
+.doc-status { font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.doc-status.ready { background: #3f9a6b22; color: #2f8a5c; }
+.doc-status.keyword_only, .doc-status.pending { background: #c4944822; color: #a87822; }
+[data-theme="dark"] .doc-status.ready { color: #91c9a5; } [data-theme="dark"] .doc-status.keyword_only, [data-theme="dark"] .doc-status.pending { color: #dfb873; }
+@media (max-width: 560px) { .doc-row { grid-template-columns: auto 1fr auto; } .doc-status { grid-column: 2; justify-self: start; } }
+.citation-source { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font-style: normal; font-size: 12px; color: var(--muted); }
+.citation-tag { font-size: 10.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; }
+.citation-tag.binding { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.citation-tag.context { background: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--muted); }
+.assessment blockquote.context-quote { border-left-color: color-mix(in srgb, var(--muted) 60%, transparent); }
+.context-note { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.modal select { width: 100%; background: white; border: 1px solid #e3dfe9; border-radius: 6px; padding: 11px 12px; font-size: 15px; line-height: 1.65; outline: none; color: inherit; }
+[data-theme="dark"] .modal select { background: #13121b; border-color: #45394f; }

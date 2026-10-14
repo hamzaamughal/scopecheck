@@ -16,7 +16,8 @@ const freshSchema = `scopecheck_verify_${randomBytes(4).toString('hex')}`;
 
 async function describe(client, schema) {
   await client.query(`SET LOCAL search_path TO ${schema}`); // FK/default text is unqualified for this schema
-  const strip = text => text.replaceAll(`${schema}.`, '');
+  // Extension types (pgvector) live in public and are written schema-qualified in migrations.
+  const strip = text => text.replaceAll(`${schema}.`, '').replaceAll('public.', '');
   const tables = new Map();
   const table = name => tables.get(name) ?? tables.set(name, { columns: new Map(), constraints: new Map(), indexes: new Map() }).get(name);
   const columns = await client.query(

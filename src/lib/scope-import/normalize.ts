@@ -47,10 +47,10 @@ export class ScopeImportError extends Error {
   constructor(message: string) { super(message); this.name = "ScopeImportError"; }
 }
 
-export function assertImportable(text: string) {
+export function assertImportable(text: string, maxChars = SCOPE_MAX_CHARS) {
   if (!text) throw new ScopeImportError("No readable text was found.");
-  if (text.length > SCOPE_MAX_CHARS) {
-    throw new ScopeImportError(`This document has ${text.length.toLocaleString("en")} characters. The limit is ${SCOPE_MAX_CHARS.toLocaleString("en")}; paste only the scope sections instead.`);
+  if (text.length > maxChars) {
+    throw new ScopeImportError(`This document has ${text.length.toLocaleString("en")} characters. The limit is ${maxChars.toLocaleString("en")}; ${maxChars === SCOPE_MAX_CHARS ? "paste only the scope sections instead" : "split it into smaller documents"}.`);
   }
 }
 

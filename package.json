@@ -16,7 +16,10 @@
     "test:edit": "node --experimental-strip-types --conditions=react-server scripts/test-edit-delete.mjs",
     "test:import": "node --experimental-strip-types --conditions=react-server --test scripts/test-scope-import.mts",
     "test:workflow": "node --experimental-strip-types --test scripts/test-workflow.mts",
-    "test:usage": "node scripts/test-assessment-usage.cjs"
+    "test:usage": "node scripts/test-assessment-usage.cjs",
+    "test:rag": "node --experimental-strip-types --conditions=react-server --test scripts/test-rag.mts",
+    "test:documents": "node --experimental-strip-types --conditions=react-server scripts/test-documents.mjs",
+    "eval:retrieval": "node --experimental-strip-types --conditions=react-server scripts/eval-retrieval.mts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.83",

@@ -16,6 +16,7 @@ export const metadata: Metadata = { title: "Decision log — ScopeCheck", robots
 type RequestRow = {
   id: string; title: string; description: string; decision: RequestDecision | null; decisionNote: string | null; decidedAt: Date | null; createdAt: Date;
   suggestion: RequestDecision | null; evidence: string[] | null; assessedAt: Date | null;
+  citations: { quote: string; binding: boolean; documentTitle: string | null; page: number | null }[] | null;
 };
 
 const date = (value: Date | string | null) => value ? new Date(value).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "—";
@@ -34,7 +35,7 @@ export default async function ReportPage({ params }: PageProps<"/projects/[proje
   const [requests, changeOrders, versions] = await Promise.all([
     db.query<RequestRow>(
       `SELECT r.id, r.title, r.description, r.decision, r.decision_note AS "decisionNote", r.decided_at AS "decidedAt", r.created_at AS "createdAt",
-         a.output->>'suggestedDecision' AS suggestion, ARRAY(SELECT jsonb_array_elements_text(a.output->'evidence')) AS evidence, a.created_at AS "assessedAt"
+         a.output->>'suggestedDecision' AS suggestion, ARRAY(SELECT jsonb_array_elements_text(a.output->'evidence')) AS evidence, a.output->'citations' AS citations, a.created_at AS "assessedAt"
        FROM requests r
        LEFT JOIN LATERAL (SELECT output, created_at FROM assessments WHERE request_id = r.id ORDER BY created_at DESC, id DESC LIMIT 1) a ON true
        WHERE r.project_id = $1 ORDER BY r.created_at ASC, r.id ASC`, [projectId]).then(result => result.rows),
@@ -82,6 +83,7 @@ export default async function ReportPage({ params }: PageProps<"/projects/[proje
         {request.suggestion && <div className="report-ai">
           <p className="report-small">AI suggestion ({date(request.assessedAt)}): {decisionLabels[request.suggestion]}. Reviewed by a person; the decision above is final.</p>
           {(request.evidence ?? []).map((quote, i) => { const page = pageOfQuote(project.scope, quote); return <p key={i} className="report-quote">“{quote}”{page !== null ? ` (page ${page})` : ""}</p>; })}
+          {(request.citations ?? []).filter(c => !c.binding).map((c, i) => <p key={`c${i}`} className="report-quote">Context: “{c.quote}” ({c.documentTitle}{c.page ? `, page ${c.page}` : ""})</p>)}
         </div>}
       </article>)}
     </section>

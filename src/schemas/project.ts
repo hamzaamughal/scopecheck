@@ -27,4 +27,6 @@ export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
 export const importLinkSchema = z.object({
   url: z.string().trim().min(1, "Paste a link").max(2048, "This link is too long"),
   projectId: z.string().uuid().optional(),
+  // "document": a supporting document, which may be longer than the agreed scope.
+  purpose: z.enum(["scope", "document"]).optional(),
 });
