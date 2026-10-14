@@ -32,7 +32,7 @@ Projects load from GET /api/projects and are saved through POST /api/projects in
 - `src/app/globals.css`: design system and responsive styles
 - `src/app/layout.tsx`: page metadata and root layout
 
-Inter is used for interface text and Manrope for headings. Both variable fonts are self-hosted in public/fonts with their SIL Open Font Licenses, so builds do not need external font downloads.
+Geist is used for interface text and headings, and Geist Mono for small labels. Both variable fonts are self-hosted in public/fonts with their SIL Open Font License, so builds do not need external font downloads.
 
 ## Checks
 
