@@ -9,9 +9,10 @@ export function toProjectView(project: ProjectDto): Project {
     name: project.name,
     client: project.clientName || "Independent project",
     clientName: project.clientName, // Raw value for edit forms.
+    source: project.source,
     initials,
     color: "purple",
-    description: project.scope.replace(/\s+/g, " ").trim(),
+    description: project.scope.replace(/^\[Page \d+\]$/gm, "").replace(/\s+/g, " ").trim(),
     scope: project.scope,
     requests: [], // Populated from the request API when loading an existing project.
   };

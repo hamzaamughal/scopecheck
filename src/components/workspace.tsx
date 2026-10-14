@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { Decision, Project, Request } from "@/lib/demo-data";
 import { ApiClientError } from "@/lib/api-client";
 import { toProjectView } from "@/lib/project-view";
@@ -8,15 +8,41 @@ import { toRequestView } from "@/lib/request-view";
 import { createRequestSchema } from "@/schemas/request";
 import { createRequest, deleteRequest, listRequests, updateRequestContent } from "@/services/requests";
 import { createProjectSchema } from "@/schemas/project";
-import { createProject, deleteProject, listProjects, updateProject } from "@/services/projects";
+import { createProject, deleteProject, importLink, listProjects, updateProject } from "@/services/projects";
 import type { FieldError } from "@/types/api";
 import AccountMenu from "@/components/account-menu";
 import { Icon, Modal } from "@/components/ui";
 import ThemeToggle from "@/components/theme-toggle";
 import DecisionForm from "@/components/decision-form";
 import AssessmentPanel from "@/components/assessment-panel";
+import ScopeField, { sourceSummary } from "@/components/scope-field";
+import { diffLines } from "@/lib/scope-import/normalize";
+import type { ImportLinkData } from "@/types/project";
 import { useAssessmentUsage } from "@/hooks/use-assessment-usage";
 import { useAssessments } from "@/hooks/use-assessments";
+
+function ScopeText({ scope }: { scope: string }) {
+  // "[Page N]" lines from imported PDFs are shown as quiet dividers.
+  const parts = scope.split(/^(\[Page \d+\])$/m);
+  return <div className="scope-copy">{parts.map((part, index) => /^\[Page \d+\]$/.test(part)
+    ? <span key={index} className="page-marker">{part.slice(1, -1)}</span>
+    : parts.length > 1 ? part.replace(/^\n+|\n+$/g, "") : part)}</div>;
+}
+
+function ScopeDiff({ before, after }: { before: string; after: string }) {
+  const lines = diffLines(before, after);
+  const added = lines.filter(line => line.type === "added").length, removed = lines.filter(line => line.type === "removed").length;
+  // Show changed lines with one line of context; collapse long unchanged stretches.
+  const keep = lines.map((line, i) => line.type !== "same" || lines[i - 1]?.type !== undefined && lines[i - 1].type !== "same" || lines[i + 1]?.type !== undefined && lines[i + 1].type !== "same");
+  const rows: ReactNode[] = []; let skipped = 0;
+  lines.forEach((line, i) => {
+    if (!keep[i]) { skipped++; return; }
+    if (skipped) { rows.push(<li key={`s${i}`} className="diff-skip">{skipped} unchanged {skipped === 1 ? "line" : "lines"}</li>); skipped = 0; }
+    rows.push(<li key={i} className={`diff-${line.type}`}><span aria-hidden="true">{line.type === "added" ? "+" : line.type === "removed" ? "−" : " "}</span>{line.text || " "}</li>);
+  });
+  if (skipped) rows.push(<li key="end" className="diff-skip">{skipped} unchanged {skipped === 1 ? "line" : "lines"}</li>);
+  return <div className="scope-diff"><p><strong>{added}</strong> {added === 1 ? "line" : "lines"} added, <strong>{removed}</strong> removed. Assessments made before an update will be marked as outdated.</p><ol>{rows}</ol></div>;
+}
 
 function Badge({ decision }: { decision?: Decision }) {
   return <span className={`badge ${decision === "Included" ? "included" : decision === "Extra work" ? "extra" : decision ? "clarify" : "pending"}`}><span/>{decision || "To review"}</span>;
@@ -37,7 +63,8 @@ export default function Workspace({ user, googleEnabled }: { user: { id: string;
   const [tab, setTab] = useState("requests");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
-  const [modal, setModal] = useState<"project" | "editProject" | "deleteProject" | "request" | "editRequest" | "deleteRequest" | "help" | null>(null);
+  const [modal, setModal] = useState<"project" | "editProject" | "deleteProject" | "request" | "editRequest" | "deleteRequest" | "scopeChanges" | "help" | null>(null);
+  const [scopeCheck, setScopeCheck] = useState<{ loading: boolean; result?: ImportLinkData; error?: string }>({ loading: false });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const project = projects.find(p => p.id === projectId);
@@ -76,7 +103,10 @@ export default function Workspace({ user, googleEnabled }: { user: { id: string;
     e.preventDefault();
     if (savingRef.current) return;
     const data = new FormData(e.currentTarget);
-    const parsed = createProjectSchema.safeParse({ name: data.get("name"), clientName: data.get("client"), scope: data.get("scope") });
+    const rawSource = data.get("source");
+    let source: unknown;
+    try { source = typeof rawSource === "string" && rawSource ? JSON.parse(rawSource) : undefined; } catch { source = undefined; }
+    const parsed = createProjectSchema.safeParse({ name: data.get("name"), clientName: data.get("client"), scope: data.get("scope"), source });
     setError(""); setFieldErrors([]);
     if (!parsed.success) {
       setFieldErrors(parsed.error.issues.map(issue => ({ field: issue.path.join("."), message: issue.message })));
@@ -177,6 +207,29 @@ export default function Workspace({ user, googleEnabled }: { user: { id: string;
       savingRef.current = false; setSaving(false);
     }
   }
+  async function checkScopeLink() {
+    if (!project?.source?.sourceUrl) return;
+    setScopeCheck({ loading: true }); setModal("scopeChanges");
+    try {
+      const result = await importLink(project.source.sourceUrl, project.id);
+      setScopeCheck({ loading: false, result });
+    } catch (error) {
+      setScopeCheck({ loading: false, error: error instanceof ApiClientError ? error.details[0]?.message ?? error.message : "Could not check the link." });
+    }
+  }
+  async function applyScopeUpdate() {
+    const result = scopeCheck.result;
+    if (!project || !result || savingRef.current) return;
+    savingRef.current = true; setSaving(true); setError("");
+    try {
+      const { project: saved } = await updateProject(project.id, { name: project.name, clientName: project.clientName ?? "", scope: result.text, source: { kind: "link", label: result.label, sourceUrl: project.source?.sourceUrl ?? result.sourceUrl } });
+      setProjects(items => items.map(p => p.id === saved.id ? { ...toProjectView(saved), requests: p.requests } : p));
+      if (requestId) void loadAssessment(saved.id, requestId);
+      setModal(null); setNotice("Scope updated from the link.");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not update the scope.");
+    } finally { savingRef.current = false; setSaving(false); }
+  }
   const editingProject = modal === "editProject" ? project : undefined;
   const editingRequest = modal === "editRequest" ? request : undefined;
 
@@ -196,8 +249,8 @@ export default function Workspace({ user, googleEnabled }: { user: { id: string;
         <button className="back-link" onClick={() => { setProjectId(null); setRequestId(null); }}><Icon name="back" size={16}/>All projects</button>
         <section className="page-heading detail-heading"><div className="project-title"><span className={`project-avatar large ${project.color}`}>{project.initials}</span><div><div className="client-label">{project.client}</div><h1>{project.name}</h1><p>Your saved project scope and client requests.</p></div></div><div className="heading-actions"><button className="button secondary" onClick={() => openModal("editProject")}><Icon name="edit" size={16}/>Edit</button><button className="button secondary" onClick={() => openModal("deleteProject")}><Icon name="trash" size={16}/>Delete</button><button className="button primary" onClick={() => openModal("request")}><Icon name="plus"/>New request</button></div></section>
         <p className="request-preview-note">Requests and decisions are saved to this project.</p><div className="detail-tabs"><button className={tab === "requests" ? "selected" : ""} aria-pressed={tab === "requests"} onClick={() => setTab("requests")}><Icon name="file" size={16}/>Client requests <span className="count">{project.requests.length}</span></button><button className={tab === "scope" ? "selected" : ""} aria-pressed={tab === "scope"} onClick={() => setTab("scope")}><Icon name="folder" size={16}/>Agreed scope</button></div>
-        {tab === "scope" ? <section className="scope-document"><div className="document-header"><span className="stat-icon lavender"><Icon name="file"/></span><div><h2>The agreed scope</h2><p>Your reference point for every client request.</p></div><span className="badge included">Baseline</span></div><div className="scope-copy">{project.scope}</div></section> : <div className={`review-layout ${request ? "has-selection" : ""}`}><section className="request-list"><div className="list-heading"><h2>Client requests</h2><span className="small-muted">{project.requests.filter(r => !r.decision).length} to review</span></div>{project.requests.length ? project.requests.map(r => <button key={r.id} className={`request-row ${requestId === r.id ? "selected" : ""}`} onClick={() => openRequest(r)}><div className="request-row-top"><Badge decision={r.decision}/><span>{r.date}</span></div><h3>{r.title}</h3><p>{r.description}</p><span className="request-open">Review request<Icon name="arrow" size={14}/></span></button>) : <div className="empty-state"><span className="empty-icon"><Icon name="file" size={28}/></span><h3>Room for the next conversation.</h3><p>Add a client request to review it against your agreed scope.</p><button className="button secondary" onClick={() => openModal("request")}><Icon name="plus" size={16}/>Add first request</button></div>}</section>
-          <section className="review-panel" aria-label="Request review">{request ? <><div className="review-panel-heading"><span className="eyebrow">REQUEST REVIEW</span><div className="review-panel-actions"><button className="icon-button" aria-label="Edit request" title="Edit request" onClick={() => openModal("editRequest")}><Icon name="edit" size={17}/></button><button className="icon-button" aria-label="Delete request" title="Delete request" onClick={() => openModal("deleteRequest")}><Icon name="trash" size={17}/></button><button className="icon-button" aria-label="Close request review" onClick={() => setRequestId(null)}><Icon name="close" size={17}/></button></div></div><h2>{request.title}</h2><p className="request-description">{request.description}</p><AssessmentPanel allowance={allowance} state={assessments[`${project.id}/${request.id}`]} onGenerate={() => void generateAssessment(project.id, request.id)} onLoad={() => void loadAssessment(project.id, request.id)}/><details className="scope-details"><summary>Read the full agreed scope<Icon name="file" size={16}/></summary><div>{project.scope}</div></details><DecisionForm key={request.id} projectId={project.id} request={request} onSaved={saved => {
+        {tab === "scope" ? <section className="scope-document"><div className="document-header"><span className="stat-icon lavender"><Icon name="file"/></span><div><h2>The agreed scope</h2><p>Your reference point for every client request.</p></div><span className="badge included">Baseline</span></div>{project.source && <div className="scope-source-bar"><span><Icon name={project.source.kind === "link" ? "link" : "file"} size={14}/>Imported from {project.source.kind === "link" && project.source.sourceUrl ? <a href={project.source.sourceUrl} target="_blank" rel="noopener noreferrer">{sourceSummary(project.source)}</a> : sourceSummary(project.source)} · {new Date(project.source.importedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}{project.source.editedSinceImport && " · edited since import"}</span>{project.source.kind === "link" && <button className="button secondary small" onClick={() => void checkScopeLink()}><Icon name="refresh" size={14}/>Check for changes</button>}</div>}<ScopeText scope={project.scope}/></section> : <div className={`review-layout ${request ? "has-selection" : ""}`}><section className="request-list"><div className="list-heading"><h2>Client requests</h2><span className="small-muted">{project.requests.filter(r => !r.decision).length} to review</span></div>{project.requests.length ? project.requests.map(r => <button key={r.id} className={`request-row ${requestId === r.id ? "selected" : ""}`} onClick={() => openRequest(r)}><div className="request-row-top"><Badge decision={r.decision}/><span>{r.date}</span></div><h3>{r.title}</h3><p>{r.description}</p><span className="request-open">Review request<Icon name="arrow" size={14}/></span></button>) : <div className="empty-state"><span className="empty-icon"><Icon name="file" size={28}/></span><h3>Room for the next conversation.</h3><p>Add a client request to review it against your agreed scope.</p><button className="button secondary" onClick={() => openModal("request")}><Icon name="plus" size={16}/>Add first request</button></div>}</section>
+          <section className="review-panel" aria-label="Request review">{request ? <><div className="review-panel-heading"><span className="eyebrow">REQUEST REVIEW</span><div className="review-panel-actions"><button className="icon-button" aria-label="Edit request" title="Edit request" onClick={() => openModal("editRequest")}><Icon name="edit" size={17}/></button><button className="icon-button" aria-label="Delete request" title="Delete request" onClick={() => openModal("deleteRequest")}><Icon name="trash" size={17}/></button><button className="icon-button" aria-label="Close request review" onClick={() => setRequestId(null)}><Icon name="close" size={17}/></button></div></div><h2>{request.title}</h2><p className="request-description">{request.description}</p><AssessmentPanel scope={project.scope} allowance={allowance} state={assessments[`${project.id}/${request.id}`]} onGenerate={() => void generateAssessment(project.id, request.id)} onLoad={() => void loadAssessment(project.id, request.id)}/><details className="scope-details"><summary>Read the full agreed scope<Icon name="file" size={16}/></summary><div>{project.scope}</div></details><DecisionForm key={request.id} projectId={project.id} request={request} onSaved={saved => {
             const updated = toRequestView(saved);
             setProjects(items => items.map(p => p.id === saved.projectId ? { ...p, requests: p.requests.map(r => r.id === saved.id ? updated : r) } : p));
             setNotice("Decision saved successfully.");
@@ -206,9 +259,17 @@ export default function Workspace({ user, googleEnabled }: { user: { id: string;
       <footer><span className="footer-brand"><Icon name="check" size={14}/>ScopeCheck</span><span>Clear scope. Better conversations.</span><span>Made for thoughtful project work.</span></footer>
     </main>
     {notice && <div className="toast" role="status"><Icon name="check" size={18}/>{notice}</div>}
-    {(modal === "project" || editingProject) && <Modal title={editingProject ? "Edit project" : "Start with a clear scope."} subtitle={editingProject ? "Changing the scope marks saved AI suggestions as outdated. Your decisions are kept." : "Add the agreement that your client requests will be reviewed against."} busy={saving} onClose={() => setModal(null)}><form onSubmit={submitProject} aria-busy={saving}><fieldset disabled={saving} className="project-fields"><label htmlFor="project-name">Project name <span>*</span></label><input id="project-name" name="name" aria-invalid={!!fieldError("name")} aria-describedby={fieldError("name") ? "name-error" : undefined} placeholder="e.g. Acme website redesign" required maxLength={100} defaultValue={editingProject?.name}/>{fieldError("name") && <p className="form-error" id="name-error" role="alert">{fieldError("name")}</p>}<label htmlFor="client-name">Client name <span>(optional)</span></label><input id="client-name" name="client" aria-invalid={!!fieldError("clientName")} aria-describedby={fieldError("clientName") ? "client-error" : undefined} placeholder="e.g. Acme Studio" maxLength={100} defaultValue={editingProject?.clientName ?? ""}/>{fieldError("clientName") && <p className="form-error" id="client-error" role="alert">{fieldError("clientName")}</p>}<label htmlFor="project-scope">Agreed scope <span>*</span></label><textarea id="project-scope" name="scope" aria-invalid={!!fieldError("scope")} aria-describedby={fieldError("scope") ? "scope-error" : undefined} rows={7} placeholder="Describe the deliverables, included revisions, and anything explicitly out of scope..." required maxLength={15000} defaultValue={editingProject?.scope}/>{fieldError("scope") && <p className="form-error" id="scope-error" role="alert">{fieldError("scope")}</p>}<p className="field-hint">Be specific. Clear deliverables make requests easier to review.</p>{error && <p className="form-error" role="alert">{error}</p>}<div className="form-actions"><button type="button" className="button secondary" onClick={() => setModal(null)}>Cancel</button><button className="button primary" type="submit">{saving ? "Saving project…" : editingProject ? "Save changes" : "Create project"}<Icon name="arrow" size={16}/></button></div></fieldset></form></Modal>}
+    {(modal === "project" || editingProject) && <Modal title={editingProject ? "Edit project" : "Start with a clear scope."} subtitle={editingProject ? "Changing the scope marks saved AI suggestions as outdated. Your decisions are kept." : "Add the agreement that your client requests will be reviewed against."} busy={saving} onClose={() => setModal(null)}><form onSubmit={submitProject} aria-busy={saving}><fieldset disabled={saving} className="project-fields"><label htmlFor="project-name">Project name <span>*</span></label><input id="project-name" name="name" aria-invalid={!!fieldError("name")} aria-describedby={fieldError("name") ? "name-error" : undefined} placeholder="e.g. Acme website redesign" required maxLength={100} defaultValue={editingProject?.name}/>{fieldError("name") && <p className="form-error" id="name-error" role="alert">{fieldError("name")}</p>}<label htmlFor="client-name">Client name <span>(optional)</span></label><input id="client-name" name="client" aria-invalid={!!fieldError("clientName")} aria-describedby={fieldError("clientName") ? "client-error" : undefined} placeholder="e.g. Acme Studio" maxLength={100} defaultValue={editingProject?.clientName ?? ""}/>{fieldError("clientName") && <p className="form-error" id="client-error" role="alert">{fieldError("clientName")}</p>}<ScopeField key={editingProject?.id ?? "new"} defaultValue={editingProject?.scope} existingSource={editingProject?.source} error={fieldError("scope") ?? fieldError("source")}/>{error && <p className="form-error" role="alert">{error}</p>}<div className="form-actions"><button type="button" className="button secondary" onClick={() => setModal(null)}>Cancel</button><button className="button primary" type="submit">{saving ? "Saving project…" : editingProject ? "Save changes" : "Create project"}<Icon name="arrow" size={16}/></button></div></fieldset></form></Modal>}
     {(modal === "request" || editingRequest) && <Modal title={editingRequest ? "Edit request" : "What’s the client asking for?"} subtitle={editingRequest ? "Changing the wording marks saved AI suggestions as outdated. Your decision is kept." : "Keep the original wording so you don’t lose important context."} busy={saving} onClose={() => setModal(null)}><form onSubmit={submitRequest} aria-busy={saving}><fieldset disabled={saving} className="project-fields"><label htmlFor="request-title">Request title <span>*</span></label><input id="request-title" name="title" aria-invalid={!!fieldError("title")} aria-describedby={fieldError("title") ? "request-title-error" : undefined} placeholder="e.g. Add a client login area" required maxLength={120} defaultValue={editingRequest?.title}/>{fieldError("title") && <p className="form-error" id="request-title-error" role="alert">{fieldError("title")}</p>}<label htmlFor="request-description">Client request <span>*</span></label><textarea id="request-description" name="description" aria-invalid={!!fieldError("description")} aria-describedby={fieldError("description") ? "request-description-error" : undefined} rows={6} placeholder="Paste or describe the client's request..." required maxLength={10000} defaultValue={editingRequest?.description}/>{fieldError("description") && <p className="form-error" id="request-description-error" role="alert">{fieldError("description")}</p>}<p className="field-hint">Save your request, then assess it against the agreed scope.</p>{error && <p className="form-error" role="alert">{error}</p>}<div className="form-actions"><button type="button" className="button secondary" onClick={() => setModal(null)}>Cancel</button><button className="button primary" type="submit">{saving ? "Saving request…" : editingRequest ? "Save changes" : "Add request"}<Icon name="arrow" size={16}/></button></div></fieldset></form></Modal>}
     {(modal === "deleteProject" || modal === "deleteRequest") && project && <Modal title={modal === "deleteProject" ? "Delete this project?" : "Delete this request?"} subtitle={modal === "deleteProject" ? `“${project.name}”, its ${project.requests.length} ${project.requests.length === 1 ? "request" : "requests"}, decisions, and saved AI suggestions will be permanently deleted.` : `“${request?.title ?? ""}”, its decision, and its saved AI suggestions will be permanently deleted.`} busy={saving} onClose={() => setModal(null)}><p className="field-hint">This cannot be undone.</p>{error && <p className="form-error" role="alert">{error}</p>}<div className="form-actions"><button type="button" className="button secondary" disabled={saving} onClick={() => setModal(null)}>Cancel</button><button type="button" className="button danger" disabled={saving} onClick={() => void confirmDelete()}><Icon name="trash" size={16}/>{saving ? "Deleting…" : "Delete permanently"}</button></div></Modal>}
+    {modal === "scopeChanges" && project && <Modal title="Check the linked scope" subtitle={project.source?.sourceUrl ? `Compares your saved scope with ${project.source.sourceUrl.replace(/^https?:\/\//, "")} as it is now.` : ""} busy={saving} onClose={() => setModal(null)}>
+      {scopeCheck.loading ? <p className="scope-check-status" role="status"><span className="spinner"/>Fetching the latest version…</p>
+        : scopeCheck.error ? <p className="form-error" role="alert">{scopeCheck.error}</p>
+        : scopeCheck.result && (scopeCheck.result.text === project.scope ? <p className="scope-check-status" role="status"><Icon name="check" size={16}/>No changes. Your saved scope matches the link.</p>
+        : <ScopeDiff before={project.scope} after={scopeCheck.result.text}/>)}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div className="form-actions"><button type="button" className="button secondary" disabled={saving} onClick={() => setModal(null)}>Close</button>{scopeCheck.result && scopeCheck.result.text !== project.scope && <button type="button" className="button primary" disabled={saving} onClick={() => void applyScopeUpdate()}>{saving ? "Updating…" : "Use the new version"}</button>}</div>
+    </Modal>}
     {modal === "help" && <Modal title="Less guesswork. More clarity." subtitle="A simple workflow for the requests that arrive after the agreement." onClose={() => setModal(null)}><div className="help-steps">{[["01", "Set the baseline", "Create a project and paste the scope you agreed with your client."], ["02", "Capture the request", "Add the client's words and compare them with the original agreement."], ["03", "Make the call", "Record whether it is included, extra work, or needs clarification."]].map(([number, title, copy]) => <div key={number}><span>{number}</span><div><h3>{title}</h3><p>{copy}</p></div></div>)}</div><div className="preview-notice"><strong>Your projects and requests are saved.</strong><p>Projects, agreed scopes, and client requests are stored in the database. Your decisions and notes are saved too. AI suggestions help you review the scope; you make the final decision. Assessments are saved with the scope and request they were based on.</p></div><button className="button primary full-width" onClick={() => setModal(null)}>Got it<Icon name="check" size={16}/></button></Modal>}
   </div>;
 }

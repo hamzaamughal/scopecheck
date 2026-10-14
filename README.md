@@ -84,3 +84,10 @@ Decision updates use a shared row mapper, typed service, and an isolated form. T
 - `DELETE /api/account` with `{ confirmEmail }` removes the user, sessions, linked logins, usage rows, and all owned projects/requests/assessments in one transaction. It requires a session created within the last 24 hours; older sessions get `REAUTH_REQUIRED`.
 - Deletes lock the affected rows first, so a concurrent assessment save or request creation waits and then fails cleanly instead of leaving orphaned rows.
 - `npm run test:edit` covers these flows against a local app (zero AI calls, no email). Like `test:auth`, it needs `npm run dev` running and DATABASE_URL.
+
+## Importing a scope
+
+- **Files** (PDF, .docx, .txt, .md): read in the browser with pdf.js / mammoth. The file is never uploaded; only the extracted text is saved. PDF text keeps `[Page N]` markers so quoted evidence shows its page. Scanned (image-only) PDFs are rejected with a clear message.
+- **Links** (`POST /api/scope-import/link`): Google Docs shared "Anyone with the link" (fetched via the plain-text export) or any public web page. The fetch blocks private/reserved addresses on the address actually connected to, re-checks every redirect, allows ports 80/443 only, and caps time (10 s) and size (2 MB). 30 link imports per user per day.
+- The source is stored in `scope_sources` (migration 006). Links are snapshots; "Check for changes" shows a line diff and can apply the new version.
+- Scope limit: 60,000 characters. `npm run test:import` runs the offline tests.

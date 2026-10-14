@@ -1,12 +1,12 @@
 import { authorizeRequest } from "@/lib/auth-session";
-import { db, withTransaction } from "@/lib/db";
+import { withTransaction } from "@/lib/db";
+import { getProject, saveScopeSource } from "@/lib/project-repository";
 import { apiError, apiSuccess } from "@/lib/api-response";
 import { updateProjectSchema } from "@/schemas/project";
 import { projectIdSchema } from "@/schemas/request";
-import type { DeleteProjectData, ProjectDto, UpdateProjectData } from "@/types/project";
+import type { DeleteProjectData, UpdateProjectData } from "@/types/project";
 
 type Params = { params: Promise<{ projectId: string }> };
-type ProjectRow = Omit<ProjectDto, "createdAt" | "updatedAt"> & { createdAt: Date; updatedAt: Date };
 
 async function parseProjectId(params: Params["params"]) {
   const parsed = projectIdSchema.safeParse((await params).projectId);
@@ -24,18 +24,21 @@ export async function PATCH(request: Request, { params }: Params) {
   if (!parsed.success) {
     return apiError("VALIDATION_ERROR", parsed.error.issues.map(issue => ({ field: issue.path.join("."), message: issue.message })));
   }
-  const { name, clientName, scope } = parsed.data;
+  const { name, clientName, scope, source } = parsed.data;
   try {
     // Saved assessments keep their scope snapshot, so a scope change marks them stale automatically.
-    const result = await db.query<ProjectRow>(
-      `UPDATE projects SET name = $1, client_name = $2, scope = $3, updated_at = NOW()
-       WHERE id = $4 AND owner_user_id = $5
-       RETURNING id, name, client_name AS "clientName", scope, created_at AS "createdAt", updated_at AS "updatedAt"`,
-      [name, clientName || null, scope, projectId, access.user.id],
-    );
-    const row = result.rows[0];
-    if (!row) return apiError("NOT_FOUND");
-    return apiSuccess<UpdateProjectData>({ project: { ...row, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() } });
+    const project = await withTransaction(async client => {
+      const updated = await client.query(
+        `UPDATE projects SET name = $1, client_name = $2, scope = $3, updated_at = NOW()
+         WHERE id = $4 AND owner_user_id = $5`,
+        [name, clientName || null, scope, projectId, access.user.id],
+      );
+      if (!updated.rowCount) return undefined;
+      await saveScopeSource(client, projectId, source);
+      return getProject(client, access.user.id, projectId);
+    });
+    if (!project) return apiError("NOT_FOUND");
+    return apiSuccess<UpdateProjectData>({ project });
   } catch {
     console.error("Failed to update project.");
     return apiError("INTERNAL_ERROR");

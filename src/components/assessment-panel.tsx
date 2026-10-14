@@ -1,8 +1,9 @@
 import type { useAssessmentUsage } from "@/hooks/use-assessment-usage";
 import type { AssessmentState } from "@/hooks/use-assessments";
 import { decisionLabels } from "@/lib/request-view";
+import { pageOfQuote } from "@/lib/scope-import/normalize";
 
-export default function AssessmentPanel({ state, onGenerate, onLoad, allowance }: { allowance: ReturnType<typeof useAssessmentUsage>; state?: AssessmentState; onGenerate: () => void; onLoad: () => void }) {
+export default function AssessmentPanel({ scope, state, onGenerate, onLoad, allowance }: { scope: string; allowance: ReturnType<typeof useAssessmentUsage>; state?: AssessmentState; onGenerate: () => void; onLoad: () => void }) {
   const assessment = state?.assessment;
   const loading = state?.loading ?? true;
   const exhausted = allowance.usage?.remaining === 0;
@@ -15,7 +16,7 @@ export default function AssessmentPanel({ state, onGenerate, onLoad, allowance }
       <span className={`badge ${assessment.suggestedDecision === "included" ? "included" : assessment.suggestedDecision === "extra_work" ? "extra" : "clarify"}`}><span/>{decisionLabels[assessment.suggestedDecision]}</span>
       <p>{assessment.explanation}</p>
       <div className="evidence-label">FROM THE AGREED SCOPE</div>
-      {assessment.evidence.length ? assessment.evidence.map((quote, index) => <blockquote key={index}>{quote}</blockquote>) : <p>No supporting scope quote was identified.</p>}
+      {assessment.evidence.length ? assessment.evidence.map((quote, index) => { const page = pageOfQuote(scope, quote); return <blockquote key={index}>{quote}{page !== null && <cite className="quote-page">Page {page}</cite>}</blockquote>; }) : <p>No supporting scope quote was identified.</p>}
       {assessment.clarificationQuestions.length > 0 && <div className="assessment-questions"><h3>Questions to clarify</h3><ul>{assessment.clarificationQuestions.map((question, index) => <li key={index}>{question}</li>)}</ul></div>}
     </> : <div className="ai-empty"><p>A second opinion on this request.</p><span>Check it against your agreed scope for a suggestion and supporting quotes.</span></div>}
     <div className="assessment-allowance" aria-live="polite">

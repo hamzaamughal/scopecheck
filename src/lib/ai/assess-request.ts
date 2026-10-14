@@ -44,6 +44,8 @@ Never paraphrase, shorten by deleting words in the middle, or add punctuation to
 Example: from "User accounts and online payments are excluded." you may copy that
 whole sentence. "User accounts are excluded." is NOT an exact quote of it.
 If no relevant evidence exists, return an empty evidence array.
+Lines like "[Page 3]" are page markers added during import. They are not scope text:
+never include them in a quote, and keep each quote within a single page.
 For needs_clarification, ask at least one specific clarification question.
 
 Do not claim that anything was approved, saved, changed, or sent.

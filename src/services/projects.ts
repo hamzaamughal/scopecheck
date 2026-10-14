@@ -1,6 +1,6 @@
 import { apiRequest } from "@/lib/api-client";
 import type { CreateProjectInput, UpdateProjectInput } from "@/schemas/project";
-import type { CreateProjectData, DeleteProjectData, ListProjectsData, UpdateProjectData } from "@/types/project";
+import type { CreateProjectData, DeleteProjectData, ImportLinkData, ListProjectsData, UpdateProjectData } from "@/types/project";
 
 const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 const projectUrl = (projectId: string) => `/api/projects/${encodeURIComponent(projectId)}`;
@@ -19,4 +19,8 @@ export function updateProject(projectId: string, input: UpdateProjectInput) {
 
 export function deleteProject(projectId: string) {
   return apiRequest<DeleteProjectData>(projectUrl(projectId), { method: "DELETE" });
+}
+
+export function importLink(url: string, projectId?: string, signal?: AbortSignal) {
+  return apiRequest<ImportLinkData>("/api/scope-import/link", { ...json("POST", { url, ...(projectId ? { projectId } : {}) }), signal });
 }

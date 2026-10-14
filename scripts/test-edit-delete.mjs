@@ -62,6 +62,33 @@ try {
   await expect(await call(projectPath, 'PATCH', a.cookie, { name: 'x', scope: 'y' }, 'https://other.example'), 403, 'Cross-origin project edit');
   await expect(await call('/api/projects/not-a-uuid', 'PATCH', a.cookie, { name: 'x', scope: 'y' }), 400, 'Invalid project ID');
 
+  // Scope import sources
+  const srcBody = { name: 'QA import', scope: '[Page 1]\nFive pages.\n\n[Page 2]\nUser accounts are excluded.', source: { kind: 'file', label: 'sow.pdf', pageCount: 2 } };
+  const { data: { project: imported } } = await expect(await call('/api/projects', 'POST', a.cookie, srcBody), 201, 'Create project with file source');
+  assert.equal(imported.source.label, 'sow.pdf'); assert.equal(imported.source.pageCount, 2); assert.equal(imported.source.editedSinceImport, false);
+  await expect(await call('/api/projects', 'POST', a.cookie, { ...srcBody, source: { kind: 'link', label: 'x' } }), 400, 'Link source without URL');
+  await expect(await call('/api/projects', 'POST', a.cookie, { ...srcBody, scope: 'x'.repeat(60001) }), 400, 'Scope over 60k');
+  assert.ok(!(await expect(await call('/api/projects', 'GET', b.cookie), 200, 'B list')).data.projects.some(p => p.id === imported.id));
+  const keptSrc = await expect(await call(`/api/projects/${imported.id}`, 'PATCH', a.cookie, { name: 'QA import', scope: srcBody.scope + '\nEdited.' }), 200, 'Edit keeps source');
+  assert.equal(keptSrc.data.project.source.label, 'sow.pdf'); assert.equal(keptSrc.data.project.source.editedSinceImport, true);
+  const cleared = await expect(await call(`/api/projects/${imported.id}`, 'PATCH', a.cookie, { name: 'QA import', scope: 'Plain.', source: null }), 200, 'Clear source');
+  assert.equal(cleared.data.project.source, null);
+  await expect(await call(`/api/projects/${imported.id}`, 'PATCH', a.cookie, { name: 'QA import', scope: 'Linked.', source: { kind: 'link', label: 'Doc', sourceUrl: 'https://example.com/sow' } }), 200, 'Set link source');
+  await expect(await call(`/api/projects/${imported.id}`, 'PATCH', b.cookie, { name: 'x', scope: 'y', source: null }), 404, 'Cross-user source edit');
+  const linkPath = '/api/scope-import/link';
+  await expect(await call(linkPath, 'POST', '', { url: 'https://example.com' }), 401, 'Anonymous link import');
+  await expect(await call(linkPath, 'POST', a.cookie, { url: 'https://example.com' }, 'https://other.example'), 403, 'Cross-origin link import');
+  await expect(await call(linkPath, 'POST', a.cookie, { url: 'ftp://example.com' }), 400, 'Unsupported scheme');
+  await expect(await call(linkPath, 'POST', b.cookie, { url: 'https://example.com', projectId: imported.id }), 404, 'Re-check foreign project link');
+  const blocked = await expect(await call(linkPath, 'POST', a.cookie, { url: 'http://169.254.169.254/latest/meta-data/' }), 422, 'Metadata address blocked');
+  assert.match(blocked.error.details[0].message, /private or local address/);
+  let limited = false;
+  for (let i = 0; i < 31 && !limited; i++) limited = (await call(linkPath, 'POST', a.cookie, { url: 'http://127.0.0.1/' })).status === 429;
+  assert.ok(limited, 'Link imports are limited per day');
+  await expect(await call(`/api/projects/${imported.id}`, 'DELETE', a.cookie), 200, 'Delete imported project');
+  assert.equal(await count('SELECT count(*) FROM scope_sources WHERE project_id = $1', [imported.id]), 0, 'Source removed with project');
+  console.log('PASS: scope sources (save, keep, clear, validation, ownership) and link import (auth, CSRF, SSRF block, daily limit, cascade).');
+
   // Request edit keeps the human decision
   const reqPath = `${projectPath}/requests`;
   const { data: { request } } = await expect(await call(reqPath, 'POST', a.cookie, { title: 'Login', description: 'Client login' }), 201, 'Create request');
@@ -111,7 +138,7 @@ try {
   for (const [sql, label] of [
     ['SELECT count(*) FROM auth_user WHERE id = $1', 'user'], ['SELECT count(*) FROM auth_session WHERE "userId" = $1', 'sessions'],
     ['SELECT count(*) FROM auth_account WHERE "userId" = $1', 'accounts'], ['SELECT count(*) FROM projects WHERE owner_user_id = $1', 'projects'],
-    ['SELECT count(*) FROM assessment_usage WHERE user_id = $1', 'usage'],
+    ['SELECT count(*) FROM assessment_usage WHERE user_id = $1', 'usage'], ['SELECT count(*) FROM import_usage WHERE user_id = $1', 'import usage'],
   ]) assert.equal(await count(sql, [a.id]), 0, `Account ${label} removed`);
   assert.equal(await count('SELECT count(*) FROM assessments WHERE request_id = $1', [keptRequest.id]), 0, 'Account assessments removed');
   await expect(await call('/api/projects', 'GET', a.cookie), 401, 'Deleted account session rejected');

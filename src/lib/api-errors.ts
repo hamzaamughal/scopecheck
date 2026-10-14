@@ -6,6 +6,8 @@ export const API_ERRORS = {
   INVALID_JSON: { status: 400, message: "Request body must contain valid JSON." },
   VALIDATION_ERROR: { status: 400, message: "Please check the submitted fields." },
   REAUTH_REQUIRED: { status: 403, message: "For your security, sign out and sign in again, then delete your account." },
+  IMPORT_FAILED: { status: 422, message: "This link could not be imported." },
+  IMPORT_LIMIT_REACHED: { status: 429, message: "You have reached today's limit of link imports. Try again tomorrow, or upload a file instead." },
   NOT_FOUND: { status: 404, message: "The requested resource was not found." },
   INTERNAL_ERROR: { status: 500, message: "Something went wrong. Please try again." },
   DATABASE_UNAVAILABLE: { status: 503, message: "Could not connect to the database." },
