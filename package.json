@@ -15,6 +15,7 @@
     "test:auth": "node --experimental-strip-types --conditions=react-server scripts/test-auth-isolation.mjs",
     "test:edit": "node --experimental-strip-types --conditions=react-server scripts/test-edit-delete.mjs",
     "test:import": "node --experimental-strip-types --conditions=react-server --test scripts/test-scope-import.mts",
+    "test:workflow": "node --experimental-strip-types --test scripts/test-workflow.mts",
     "test:usage": "node scripts/test-assessment-usage.cjs"
   },
   "dependencies": {

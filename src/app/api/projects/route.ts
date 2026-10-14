@@ -2,6 +2,7 @@ import { authorizeRequest } from "@/lib/auth-session";
 import { withTransaction } from "@/lib/db";
 import { apiError, apiSuccess } from "@/lib/api-response";
 import { getProject, listProjects, saveScopeSource } from "@/lib/project-repository";
+import { recordScopeVersion } from "@/lib/workflow-repository";
 import { createProjectSchema } from "@/schemas/project";
 import type { CreateProjectData, ListProjectsData } from "@/types/project";
 
@@ -30,6 +31,7 @@ export async function POST(request: Request) {
         [name, clientName || null, scope, access.user.id],
       );
       await saveScopeSource(client, inserted.rows[0].id, source);
+      await recordScopeVersion(client, inserted.rows[0].id, source ? "import" : "initial");
       return getProject(client, access.user.id, inserted.rows[0].id);
     });
     if (!project) return apiError("INTERNAL_ERROR");

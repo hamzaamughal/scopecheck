@@ -1,6 +1,7 @@
 import { authorizeRequest } from "@/lib/auth-session";
 import { withTransaction } from "@/lib/db";
 import { getProject, saveScopeSource } from "@/lib/project-repository";
+import { recordScopeVersion } from "@/lib/workflow-repository";
 import { apiError, apiSuccess } from "@/lib/api-response";
 import { updateProjectSchema } from "@/schemas/project";
 import { projectIdSchema } from "@/schemas/request";
@@ -35,6 +36,8 @@ export async function PATCH(request: Request, { params }: Params) {
       );
       if (!updated.rowCount) return undefined;
       await saveScopeSource(client, projectId, source);
+      // UPDATE above holds the project row lock, so version numbers cannot race.
+      await recordScopeVersion(client, projectId, source?.kind === "link" ? "link_update" : source ? "import" : "edit");
       return getProject(client, access.user.id, projectId);
     });
     if (!project) return apiError("NOT_FOUND");

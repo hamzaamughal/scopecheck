@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Decision, Project, Request } from "@/lib/demo-data";
 import { ApiClientError } from "@/lib/api-client";
 import { toProjectView } from "@/lib/project-view";
@@ -16,33 +16,18 @@ import ThemeToggle from "@/components/theme-toggle";
 import DecisionForm from "@/components/decision-form";
 import AssessmentPanel from "@/components/assessment-panel";
 import ScopeField, { sourceSummary } from "@/components/scope-field";
-import { diffLines } from "@/lib/scope-import/normalize";
-import type { ImportLinkData } from "@/types/project";
+import ReplyDraft from "@/components/reply-draft";
+import ScopeHistory from "@/components/scope-history";
+import { ChangeOrderForm, ChangeOrdersPanel, formatEstimate, type ChangeOrderPrefill } from "@/components/change-orders";
+import { listChangeOrders } from "@/services/workflow";
+import type { ChangeOrderDto } from "@/types/workflow";
+import type { RequestDecision } from "@/types/request";
+import { ScopeDiff, ScopeText } from "@/components/scope-view";
+import type { ImportLinkData, ProjectDto } from "@/types/project";
 import { useAssessmentUsage } from "@/hooks/use-assessment-usage";
 import { useAssessments } from "@/hooks/use-assessments";
 
-function ScopeText({ scope }: { scope: string }) {
-  // "[Page N]" lines from imported PDFs are shown as quiet dividers.
-  const parts = scope.split(/^(\[Page \d+\])$/m);
-  return <div className="scope-copy">{parts.map((part, index) => /^\[Page \d+\]$/.test(part)
-    ? <span key={index} className="page-marker">{part.slice(1, -1)}</span>
-    : parts.length > 1 ? part.replace(/^\n+|\n+$/g, "") : part)}</div>;
-}
-
-function ScopeDiff({ before, after }: { before: string; after: string }) {
-  const lines = diffLines(before, after);
-  const added = lines.filter(line => line.type === "added").length, removed = lines.filter(line => line.type === "removed").length;
-  // Show changed lines with one line of context; collapse long unchanged stretches.
-  const keep = lines.map((line, i) => line.type !== "same" || lines[i - 1]?.type !== undefined && lines[i - 1].type !== "same" || lines[i + 1]?.type !== undefined && lines[i + 1].type !== "same");
-  const rows: ReactNode[] = []; let skipped = 0;
-  lines.forEach((line, i) => {
-    if (!keep[i]) { skipped++; return; }
-    if (skipped) { rows.push(<li key={`s${i}`} className="diff-skip">{skipped} unchanged {skipped === 1 ? "line" : "lines"}</li>); skipped = 0; }
-    rows.push(<li key={i} className={`diff-${line.type}`}><span aria-hidden="true">{line.type === "added" ? "+" : line.type === "removed" ? "−" : " "}</span>{line.text || " "}</li>);
-  });
-  if (skipped) rows.push(<li key="end" className="diff-skip">{skipped} unchanged {skipped === 1 ? "line" : "lines"}</li>);
-  return <div className="scope-diff"><p><strong>{added}</strong> {added === 1 ? "line" : "lines"} added, <strong>{removed}</strong> removed. Assessments made before an update will be marked as outdated.</p><ol>{rows}</ol></div>;
-}
+const DECISION_VALUES: Record<Decision, RequestDecision> = { Included: "included", "Extra work": "extra_work", "Needs clarification": "needs_clarification" };
 
 function Badge({ decision }: { decision?: Decision }) {
   return <span className={`badge ${decision === "Included" ? "included" : decision === "Extra work" ? "extra" : decision ? "clarify" : "pending"}`}><span/>{decision || "To review"}</span>;
@@ -64,6 +49,11 @@ export default function Workspace({ user, googleEnabled }: { user: { id: string;
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [modal, setModal] = useState<"project" | "editProject" | "deleteProject" | "request" | "editRequest" | "deleteRequest" | "scopeChanges" | "help" | null>(null);
+  const [changeOrders, setChangeOrders] = useState<Record<string, ChangeOrderDto[]>>({});
+  const [coErrors, setCoErrors] = useState<Record<string, string>>({});
+  const [coReload, setCoReload] = useState(0);
+  const [coForm, setCoForm] = useState<ChangeOrderPrefill | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [scopeCheck, setScopeCheck] = useState<{ loading: boolean; result?: ImportLinkData; error?: string }>({ loading: false });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -77,6 +67,14 @@ export default function Workspace({ user, googleEnabled }: { user: { id: string;
     if (projectId && requestId) void loadAssessment(projectId, requestId);
   }, [projectId, requestId, loadAssessment]);
 
+  useEffect(() => {
+    if (!projectId) return;
+    const controller = new AbortController();
+    listChangeOrders(projectId, controller.signal)
+      .then(({ changeOrders: orders }) => setChangeOrders(all => ({ ...all, [projectId]: orders })))
+      .catch(error => { if (!controller.signal.aborted) setCoErrors(all => ({ ...all, [projectId]: error instanceof Error ? error.message : "Could not load change orders." })); });
+    return () => controller.abort();
+  }, [projectId, coReload]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(""), 3500); return () => clearTimeout(timer); }, [notice]);
   useEffect(() => {
     const controller = new AbortController();
@@ -230,6 +228,13 @@ export default function Workspace({ user, googleEnabled }: { user: { id: string;
       setError(error instanceof Error ? error.message : "Could not update the scope.");
     } finally { savingRef.current = false; setSaving(false); }
   }
+  const projectOrders = (project && changeOrders[project.id]) || [];
+  const requestDecision: RequestDecision | null = request?.decision ? DECISION_VALUES[request.decision] : null;
+  const requestOrder = request ? projectOrders.find(order => order.requestId === request.id && order.status !== "rejected") : undefined;
+  function applyProjectUpdate(saved: ProjectDto) {
+    setProjects(items => items.map(p => p.id === saved.id ? { ...toProjectView(saved), requests: p.requests } : p));
+    if (requestId) void loadAssessment(saved.id, requestId);
+  }
   const editingProject = modal === "editProject" ? project : undefined;
   const editingRequest = modal === "editRequest" ? request : undefined;
 
@@ -247,14 +252,19 @@ export default function Workspace({ user, googleEnabled }: { user: { id: string;
         <section className="guide-banner"><span className="guide-icon"><Icon name="sparkle" size={24}/></span><div><h3>A second pair of eyes. You make the call.</h3><p>Compare requests with the agreed scope, review the evidence, and record your decision.</p></div><button className="text-button" onClick={() => openModal("help")}>How it works<Icon name="arrow" size={15}/></button></section>
       </> : <>
         <button className="back-link" onClick={() => { setProjectId(null); setRequestId(null); }}><Icon name="back" size={16}/>All projects</button>
-        <section className="page-heading detail-heading"><div className="project-title"><span className={`project-avatar large ${project.color}`}>{project.initials}</span><div><div className="client-label">{project.client}</div><h1>{project.name}</h1><p>Your saved project scope and client requests.</p></div></div><div className="heading-actions"><button className="button secondary" onClick={() => openModal("editProject")}><Icon name="edit" size={16}/>Edit</button><button className="button secondary" onClick={() => openModal("deleteProject")}><Icon name="trash" size={16}/>Delete</button><button className="button primary" onClick={() => openModal("request")}><Icon name="plus"/>New request</button></div></section>
-        <p className="request-preview-note">Requests and decisions are saved to this project.</p><div className="detail-tabs"><button className={tab === "requests" ? "selected" : ""} aria-pressed={tab === "requests"} onClick={() => setTab("requests")}><Icon name="file" size={16}/>Client requests <span className="count">{project.requests.length}</span></button><button className={tab === "scope" ? "selected" : ""} aria-pressed={tab === "scope"} onClick={() => setTab("scope")}><Icon name="folder" size={16}/>Agreed scope</button></div>
-        {tab === "scope" ? <section className="scope-document"><div className="document-header"><span className="stat-icon lavender"><Icon name="file"/></span><div><h2>The agreed scope</h2><p>Your reference point for every client request.</p></div><span className="badge included">Baseline</span></div>{project.source && <div className="scope-source-bar"><span><Icon name={project.source.kind === "link" ? "link" : "file"} size={14}/>Imported from {project.source.kind === "link" && project.source.sourceUrl ? <a href={project.source.sourceUrl} target="_blank" rel="noopener noreferrer">{sourceSummary(project.source)}</a> : sourceSummary(project.source)} · {new Date(project.source.importedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}{project.source.editedSinceImport && " · edited since import"}</span>{project.source.kind === "link" && <button className="button secondary small" onClick={() => void checkScopeLink()}><Icon name="refresh" size={14}/>Check for changes</button>}</div>}<ScopeText scope={project.scope}/></section> : <div className={`review-layout ${request ? "has-selection" : ""}`}><section className="request-list"><div className="list-heading"><h2>Client requests</h2><span className="small-muted">{project.requests.filter(r => !r.decision).length} to review</span></div>{project.requests.length ? project.requests.map(r => <button key={r.id} className={`request-row ${requestId === r.id ? "selected" : ""}`} onClick={() => openRequest(r)}><div className="request-row-top"><Badge decision={r.decision}/><span>{r.date}</span></div><h3>{r.title}</h3><p>{r.description}</p><span className="request-open">Review request<Icon name="arrow" size={14}/></span></button>) : <div className="empty-state"><span className="empty-icon"><Icon name="file" size={28}/></span><h3>Room for the next conversation.</h3><p>Add a client request to review it against your agreed scope.</p><button className="button secondary" onClick={() => openModal("request")}><Icon name="plus" size={16}/>Add first request</button></div>}</section>
+        <section className="page-heading detail-heading"><div className="project-title"><span className={`project-avatar large ${project.color}`}>{project.initials}</span><div><div className="client-label">{project.client}</div><h1>{project.name}</h1><p>Your saved project scope and client requests.</p></div></div><div className="heading-actions"><a className="button secondary" href={`/projects/${project.id}/report`} target="_blank" rel="noopener"><Icon name="receipt" size={16}/>Report</a><button className="button secondary" onClick={() => openModal("editProject")}><Icon name="edit" size={16}/>Edit</button><button className="button secondary" onClick={() => openModal("deleteProject")}><Icon name="trash" size={16}/>Delete</button><button className="button primary" onClick={() => openModal("request")}><Icon name="plus"/>New request</button></div></section>
+        <p className="request-preview-note">Requests and decisions are saved to this project.</p><div className="detail-tabs"><button className={tab === "requests" ? "selected" : ""} aria-pressed={tab === "requests"} onClick={() => setTab("requests")}><Icon name="file" size={16}/>Client requests <span className="count">{project.requests.length}</span></button><button className={tab === "scope" ? "selected" : ""} aria-pressed={tab === "scope"} onClick={() => setTab("scope")}><Icon name="folder" size={16}/>Agreed scope</button><button className={tab === "changes" ? "selected" : ""} aria-pressed={tab === "changes"} onClick={() => setTab("changes")}><Icon name="receipt" size={16}/>Change orders <span className="count">{projectOrders.length}</span></button></div>
+        {tab === "changes" ? <ChangeOrdersPanel projectId={project.id} orders={projectOrders} loading={!changeOrders[project.id] && !coErrors[project.id]} loadError={changeOrders[project.id] ? "" : coErrors[project.id] ?? ""}
+          requestTitles={Object.fromEntries(project.requests.map(r => [r.id, r.title]))} onRetry={() => { setCoErrors(all => ({ ...all, [project.id]: "" })); setCoReload(value => value + 1); }} onNew={() => setCoForm({ title: "", description: "" })}
+          onChanged={orders => setChangeOrders(all => ({ ...all, [project.id]: orders }))} onProjectUpdated={applyProjectUpdate} onNotice={setNotice}/>
+        : tab === "scope" ? <section className="scope-document"><div className="document-header"><span className="stat-icon lavender"><Icon name="file"/></span><div><h2>The agreed scope</h2><p>Your reference point for every client request.</p></div><button type="button" className="button secondary small" onClick={() => setHistoryOpen(true)}><Icon name="history" size={14}/>History</button></div>{project.source && <div className="scope-source-bar"><span><Icon name={project.source.kind === "link" ? "link" : "file"} size={14}/>Imported from {project.source.kind === "link" && project.source.sourceUrl ? <a href={project.source.sourceUrl} target="_blank" rel="noopener noreferrer">{sourceSummary(project.source)}</a> : sourceSummary(project.source)} · {new Date(project.source.importedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}{project.source.editedSinceImport && " · edited since import"}</span>{project.source.kind === "link" && <button className="button secondary small" onClick={() => void checkScopeLink()}><Icon name="refresh" size={14}/>Check for changes</button>}</div>}<ScopeText scope={project.scope}/></section> : <div className={`review-layout ${request ? "has-selection" : ""}`}><section className="request-list"><div className="list-heading"><h2>Client requests</h2><span className="small-muted">{project.requests.filter(r => !r.decision).length} to review</span></div>{project.requests.length ? project.requests.map(r => <button key={r.id} className={`request-row ${requestId === r.id ? "selected" : ""}`} onClick={() => openRequest(r)}><div className="request-row-top"><Badge decision={r.decision}/><span>{r.date}</span></div><h3>{r.title}</h3><p>{r.description}</p><span className="request-open">Review request<Icon name="arrow" size={14}/></span></button>) : <div className="empty-state"><span className="empty-icon"><Icon name="file" size={28}/></span><h3>Room for the next conversation.</h3><p>Add a client request to review it against your agreed scope.</p><button className="button secondary" onClick={() => openModal("request")}><Icon name="plus" size={16}/>Add first request</button></div>}</section>
           <section className="review-panel" aria-label="Request review">{request ? <><div className="review-panel-heading"><span className="eyebrow">REQUEST REVIEW</span><div className="review-panel-actions"><button className="icon-button" aria-label="Edit request" title="Edit request" onClick={() => openModal("editRequest")}><Icon name="edit" size={17}/></button><button className="icon-button" aria-label="Delete request" title="Delete request" onClick={() => openModal("deleteRequest")}><Icon name="trash" size={17}/></button><button className="icon-button" aria-label="Close request review" onClick={() => setRequestId(null)}><Icon name="close" size={17}/></button></div></div><h2>{request.title}</h2><p className="request-description">{request.description}</p><AssessmentPanel scope={project.scope} allowance={allowance} state={assessments[`${project.id}/${request.id}`]} onGenerate={() => void generateAssessment(project.id, request.id)} onLoad={() => void loadAssessment(project.id, request.id)}/><details className="scope-details"><summary>Read the full agreed scope<Icon name="file" size={16}/></summary><div>{project.scope}</div></details><DecisionForm key={request.id} projectId={project.id} request={request} onSaved={saved => {
             const updated = toRequestView(saved);
             setProjects(items => items.map(p => p.id === saved.projectId ? { ...p, requests: p.requests.map(r => r.id === saved.id ? updated : r) } : p));
             setNotice("Decision saved successfully.");
-          }}/></> : <div className="empty-state review-empty"><div className="scope-illustration"><Icon name="file" size={40}/><span><Icon name="check" size={18}/></span></div><h3>A little context. A clearer decision.</h3><p>Select a request to see the details, compare it with your scope, and decide what comes next.</p><span className="small-muted">Your scope is the source of truth.</span></div>}</section></div>}
+          }}/>{requestDecision === "extra_work" && <div className="co-prompt">{requestOrder ? <span><Icon name="receipt" size={15}/>Change order #{requestOrder.number} · {requestOrder.status}{formatEstimate(requestOrder) ? ` · ${formatEstimate(requestOrder)}` : ""}</span> : <span>This is extra work. Turn it into a change order with an estimate.</span>}
+            {requestOrder ? <button type="button" className="text-button" onClick={() => setTab("changes")}>View<Icon name="arrow" size={14}/></button> : <button type="button" className="button secondary small" onClick={() => setCoForm({ title: request.title, description: request.description, requestId: request.id })}><Icon name="plus" size={14}/>Create change order</button>}</div>}
+          <ReplyDraft key={`reply-${request.id}`} projectId={project.id} requestId={request.id} decision={requestDecision} allowance={allowance}/></> : <div className="empty-state review-empty"><div className="scope-illustration"><Icon name="file" size={40}/><span><Icon name="check" size={18}/></span></div><h3>A little context. A clearer decision.</h3><p>Select a request to see the details, compare it with your scope, and decide what comes next.</p><span className="small-muted">Your scope is the source of truth.</span></div>}</section></div>}
       </>}
       <footer><span className="footer-brand"><Icon name="check" size={14}/>ScopeCheck</span><span>Clear scope. Better conversations.</span><span>Made for thoughtful project work.</span></footer>
     </main>
@@ -270,6 +280,8 @@ export default function Workspace({ user, googleEnabled }: { user: { id: string;
       {error && <p className="form-error" role="alert">{error}</p>}
       <div className="form-actions"><button type="button" className="button secondary" disabled={saving} onClick={() => setModal(null)}>Close</button>{scopeCheck.result && scopeCheck.result.text !== project.scope && <button type="button" className="button primary" disabled={saving} onClick={() => void applyScopeUpdate()}>{saving ? "Updating…" : "Use the new version"}</button>}</div>
     </Modal>}
+    {coForm && project && <ChangeOrderForm projectId={project.id} prefill={coForm} onClose={() => setCoForm(null)} onSaved={order => { setChangeOrders(all => ({ ...all, [project.id]: [order, ...(all[project.id] ?? [])] })); setCoForm(null); setNotice(`Change order #${order.number} created.`); }}/>}
+    {historyOpen && project && <ScopeHistory projectId={project.id} currentScope={project.scope} onClose={() => setHistoryOpen(false)}/>}
     {modal === "help" && <Modal title="Less guesswork. More clarity." subtitle="A simple workflow for the requests that arrive after the agreement." onClose={() => setModal(null)}><div className="help-steps">{[["01", "Set the baseline", "Create a project and paste the scope you agreed with your client."], ["02", "Capture the request", "Add the client's words and compare them with the original agreement."], ["03", "Make the call", "Record whether it is included, extra work, or needs clarification."]].map(([number, title, copy]) => <div key={number}><span>{number}</span><div><h3>{title}</h3><p>{copy}</p></div></div>)}</div><div className="preview-notice"><strong>Your projects and requests are saved.</strong><p>Projects, agreed scopes, and client requests are stored in the database. Your decisions and notes are saved too. AI suggestions help you review the scope; you make the final decision. Assessments are saved with the scope and request they were based on.</p></div><button className="button primary full-width" onClick={() => setModal(null)}>Got it<Icon name="check" size={16}/></button></Modal>}
   </div>;
 }

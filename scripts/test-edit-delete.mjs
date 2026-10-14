@@ -89,6 +89,73 @@ try {
   assert.equal(await count('SELECT count(*) FROM scope_sources WHERE project_id = $1', [imported.id]), 0, 'Source removed with project');
   console.log('PASS: scope sources (save, keep, clear, validation, ownership) and link import (auth, CSRF, SSRF block, daily limit, cascade).');
 
+  // Scope versions, change orders, reply drafts
+  {
+    const { data: { project: wp } } = await expect(await call('/api/projects', 'POST', a.cookie, { name: 'QA workflow', clientName: 'Sam', scope: 'Five pages. User accounts are excluded.' }), 201, 'Create workflow project');
+    const P = `/api/projects/${wp.id}`;
+    let versions = (await expect(await call(`${P}/scope-versions`, 'GET', a.cookie), 200, 'List versions')).data.versions;
+    assert.deepEqual(versions.map(v => [v.version, v.reason]), [[1, 'initial']]);
+    await expect(await call(P, 'PATCH', a.cookie, { name: 'QA workflow', clientName: 'Sam', scope: 'Six pages. User accounts are excluded.' }), 200, 'Edit scope');
+    await expect(await call(P, 'PATCH', a.cookie, { name: 'QA workflow renamed', clientName: 'Sam', scope: 'Six pages. User accounts are excluded.' }), 200, 'Rename only');
+    versions = (await expect(await call(`${P}/scope-versions`, 'GET', a.cookie), 200, 'List versions')).data.versions;
+    assert.deepEqual(versions.map(v => [v.version, v.reason]), [[2, 'edit'], [1, 'initial']], 'Rename does not create a version');
+    assert.equal((await expect(await call(`${P}/scope-versions?version=1`, 'GET', a.cookie), 200, 'Get v1')).data.version.scope, 'Five pages. User accounts are excluded.');
+    await expect(await call(`${P}/scope-versions?version=abc`, 'GET', a.cookie), 400, 'Invalid version');
+    await expect(await call(`${P}/scope-versions`, 'GET', b.cookie), 404, 'Cross-user versions');
+
+    const { data: { request: wr } } = await expect(await call(`${P}/requests`, 'POST', a.cookie, { title: 'Client login', description: 'Can clients log in?' }), 201, 'Create request');
+    const R = `${P}/replies`;
+    assert.equal((await expect(await call(`${R}?requestId=${wr.id}`, 'GET', a.cookie), 200, 'No draft yet')).data.draft, null);
+    await expect(await call(R, 'POST', a.cookie, { requestId: wr.id }), 409, 'Reply needs a decision');
+    await expect(await call(R, 'POST', b.cookie, { requestId: wr.id }), 404, 'Cross-user reply');
+    await expect(await call(`${R}?requestId=${wr.id}`, 'GET', b.cookie), 404, 'Cross-user reply read');
+    await expect(await call(R, 'POST', a.cookie, { requestId: 'nope' }), 400, 'Invalid reply input');
+
+    const CO = `${P}/change-orders`;
+    const first = (await expect(await call(CO, 'POST', a.cookie, { title: 'Client login', description: 'Accounts for clients.', hours: 6, amount: 450, currency: 'USD', requestId: wr.id }), 201, 'Create CO')).data.changeOrder;
+    assert.deepEqual([first.number, first.amountCents, first.hours, first.status, first.requestId], [1, 45000, 6, 'proposed', wr.id]);
+    const second = (await expect(await call(CO, 'POST', a.cookie, { title: 'Blog', description: 'Blog section.' }), 201, 'Create CO 2')).data.changeOrder;
+    assert.equal(second.number, 2);
+    await expect(await call(CO, 'POST', a.cookie, { title: 'x', description: 'y', amount: -1 }), 400, 'Negative amount');
+    await expect(await call(CO, 'POST', a.cookie, { title: 'x', description: 'y', requestId: imported.id }), 404, 'Request from another project');
+    await expect(await call(CO, 'POST', b.cookie, { title: 'x', description: 'y' }), 404, 'Cross-user CO create');
+    await expect(await call(CO, 'GET', b.cookie), 404, 'Cross-user CO list');
+    await expect(await call(`${CO}/${first.id}`, 'PATCH', b.cookie, { action: 'accept' }), 404, 'Cross-user accept');
+    await expect(await call(`${CO}/${first.id}`, 'PATCH', a.cookie, { title: 'Client login area', description: 'Accounts for clients.', hours: '6', amount: '450', currency: 'USD' }), 200, 'Edit proposed CO');
+    const accepted = (await expect(await call(`${CO}/${first.id}`, 'PATCH', a.cookie, { action: 'accept' }), 200, 'Accept CO')).data;
+    assert.equal(accepted.changeOrder.status, 'accepted');
+    assert.match(accepted.project.scope, /\[Change order #1 · accepted \d{4}-\d{2}-\d{2}\]\nClient login area\nAccounts for clients\.\nEstimate: 6 hours · USD 450\.00$/);
+    versions = (await expect(await call(`${P}/scope-versions`, 'GET', a.cookie), 200, 'Versions after accept')).data.versions;
+    assert.deepEqual([versions[0].version, versions[0].reason, versions[0].changeOrderNumber], [3, 'change_order', 1]);
+    await expect(await call(`${CO}/${first.id}`, 'PATCH', a.cookie, { action: 'accept' }), 409, 'Accept twice');
+    await expect(await call(`${CO}/${first.id}`, 'PATCH', a.cookie, { action: 'reject' }), 409, 'Reject accepted');
+    await expect(await call(`${CO}/${first.id}`, 'DELETE', a.cookie), 409, 'Delete accepted');
+    assert.equal((await expect(await call(`${CO}/${second.id}`, 'PATCH', a.cookie, { action: 'reject' }), 200, 'Reject CO')).data.changeOrder.status, 'rejected');
+    await expect(await call(`${CO}/${second.id}`, 'DELETE', a.cookie), 200, 'Delete rejected CO');
+
+    // Accepting must not push the scope past the limit; the order stays proposed.
+    const { data: { project: big } } = await expect(await call('/api/projects', 'POST', a.cookie, { name: 'QA big', scope: 'x'.repeat(59990) }), 201, 'Large scope');
+    const bigOrder = (await expect(await call(`/api/projects/${big.id}/change-orders`, 'POST', a.cookie, { title: 'More', description: 'y'.repeat(100) }), 201, 'CO on large scope')).data.changeOrder;
+    await expect(await call(`/api/projects/${big.id}/change-orders/${bigOrder.id}`, 'PATCH', a.cookie, { action: 'accept' }), 422, 'Scope too long');
+    assert.equal((await expect(await call(`/api/projects/${big.id}/change-orders`, 'GET', a.cookie), 200, 'List')).data.changeOrders[0].status, 'proposed');
+    await expect(await call(`/api/projects/${big.id}`, 'DELETE', a.cookie), 200, 'Delete large project');
+
+    await expect(await call(`${P}/requests/${wr.id}`, 'PATCH', a.cookie, { decision: 'extra_work', decisionNote: 'Outside scope' }), 200, 'Decide');
+    if (process.argv.includes('--fake-ai')) {
+      // Only with a dev server started with SCOPECHECK_FAKE_AI=1 (never spends credits).
+      const draft = (await expect(await call(R, 'POST', a.cookie, { requestId: wr.id, tone: 'formal' }), 201, 'Draft reply')).data.draft;
+      assert.match(draft.body, /Hi Sam/); assert.match(draft.body, /change order #1/); assert.equal(draft.tone, 'formal'); assert.equal(draft.isStale, false);
+      await expect(await call(`${P}/requests/${wr.id}`, 'PATCH', a.cookie, { decision: 'included' }), 200, 'Change decision');
+      assert.equal((await expect(await call(`${R}?requestId=${wr.id}`, 'GET', a.cookie), 200, 'Stale draft')).data.draft.isStale, true);
+      console.log('PASS: reply drafts (fake AI): generation, change order mention, stale after decision change.');
+    }
+    await expect(await call(`${P}/requests/${wr.id}`, 'DELETE', a.cookie), 200, 'Delete request with CO');
+    assert.equal(await count('SELECT count(*) FROM change_orders WHERE id = $1 AND request_id IS NULL', [first.id]), 1, 'CO kept, request link cleared');
+    await expect(await call(P, 'DELETE', a.cookie), 200, 'Delete workflow project');
+    for (const table of ['change_orders', 'scope_versions']) assert.equal(await count(`SELECT count(*) FROM ${table} WHERE project_id = $1`, [wp.id]), 0, `${table} removed`);
+    console.log('PASS: scope versions, change orders (numbering, edit, accept into scope, reject, delete rules, limits, ownership), reply-draft guards, cascades.');
+  }
+
   // Request edit keeps the human decision
   const reqPath = `${projectPath}/requests`;
   const { data: { request } } = await expect(await call(reqPath, 'POST', a.cookie, { title: 'Login', description: 'Client login' }), 201, 'Create request');
@@ -127,7 +194,7 @@ try {
   const { data: { project: kept } } = await expect(await call('/api/projects', 'POST', a.cookie, { name: 'QA account', scope: 'x' }), 201, 'Create project');
   const { data: { request: keptRequest } } = await expect(await call(`/api/projects/${kept.id}/requests`, 'POST', a.cookie, { title: 'R', description: 'x' }), 201, 'Create request');
   await addAssessment(keptRequest.id);
-  await pool.query('INSERT INTO assessment_usage (user_id, usage_day, used) VALUES ($1, CURRENT_DATE, 1)', [a.id]);
+  await pool.query('INSERT INTO assessment_usage (user_id, usage_day, used) VALUES ($1, CURRENT_DATE, 1) ON CONFLICT DO NOTHING', [a.id]);
   await expect(await call('/api/account', 'DELETE', b.cookie, { confirmEmail: emails[0] }), 400, 'Wrong confirmation email');
   await expect(await call('/api/account', 'DELETE', a.cookie, { confirmEmail: emails[0] }, 'https://other.example'), 403, 'Cross-origin account delete');
   await pool.query(`UPDATE auth_session SET "createdAt" = NOW() - interval '2 days' WHERE "userId" = $1`, [a.id]);

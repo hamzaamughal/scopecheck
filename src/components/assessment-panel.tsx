@@ -20,7 +20,7 @@ export default function AssessmentPanel({ scope, state, onGenerate, onLoad, allo
       {assessment.clarificationQuestions.length > 0 && <div className="assessment-questions"><h3>Questions to clarify</h3><ul>{assessment.clarificationQuestions.map((question, index) => <li key={index}>{question}</li>)}</ul></div>}
     </> : <div className="ai-empty"><p>A second opinion on this request.</p><span>Check it against your agreed scope for a suggestion and supporting quotes.</span></div>}
     <div className="assessment-allowance" aria-live="polite">
-      {allowance.usage ? <><strong>{allowance.usage.remaining} of {allowance.usage.limit} assessment attempts remaining</strong><span>Resets {new Date(allowance.usage.resetsAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} (your local time).</span></> : <span>Loading your allowance…</span>}
+      {allowance.usage ? <><strong>{allowance.usage.remaining} of {allowance.usage.limit} AI attempts left today</strong><span>Resets {new Date(allowance.usage.resetsAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} (your local time).</span></> : <span>Loading your allowance…</span>}
       {exhausted && <p>Daily limit reached. Saved assessments and manual decisions are still available.</p>}
       {allowance.error && <p role="alert">{allowance.error}</p>}
       {(allowance.error || exhausted) && <button type="button" className="text-button" onClick={() => void allowance.refresh()}>Refresh allowance</button>}
@@ -28,6 +28,6 @@ export default function AssessmentPanel({ scope, state, onGenerate, onLoad, allo
     <div className="assessment-actions"><button type="button" className="button secondary" disabled={loading || (!state?.retryLoad && generationBlocked)} onClick={state?.retryLoad ? onLoad : onGenerate}>{loading ? state?.generating ? "Assessing request…" : "Loading assessment…" : state?.retryLoad ? "Reload saved assessment" : exhausted ? "Daily limit reached" : state?.error ? "Try assessment again" : assessment ? "Assess again" : "Assess request"}</button></div>
     {loading && <p role="status">{state?.generating ? "Comparing the request with your scope. This may take a moment." : "Getting your saved assessment."}</p>}
     {state?.error && <div className="form-error" role="alert">{state.error}{assessment && " Your previous suggestion is still shown."}</div>}
-    <p className="assessment-caption">Review the evidence before saving your own decision below. Successful assessments are saved automatically. Attempts count once processing starts, including failed attempts.</p>
+    <p className="assessment-caption">Review the evidence before saving your own decision below. Successful assessments are saved automatically. Assessments and reply drafts share the daily allowance; an attempt counts once processing starts, even if it fails.</p>
   </section>;
 }

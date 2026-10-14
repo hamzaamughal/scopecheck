@@ -35,7 +35,7 @@ export async function listProjects(userId: string) {
   return result.rows.map(toProjectDto);
 }
 
-export async function getProject(client: PoolClient, userId: string, projectId: string) {
+export async function getProject(client: Pick<PoolClient, "query">, userId: string, projectId: string) {
   const result = await client.query<ProjectRow>(`SELECT ${PROJECT_COLUMNS} ${PROJECT_FROM} WHERE p.id = $1 AND p.owner_user_id = $2`, [projectId, userId]);
   return result.rows[0] ? toProjectDto(result.rows[0]) : undefined;
 }

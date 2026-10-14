@@ -15,7 +15,7 @@ export function useAssessmentUsage() {
     return apiRequest<GetUsageData>("/api/usage", { signal: pending.signal }).then(data => {
       if (latest.current === version && !pending.signal.aborted) { setUsage(data.usage); setError(""); }
     }).catch(() => {
-      if (latest.current === version && !pending.signal.aborted) setError("Could not refresh your assessment allowance.");
+      if (latest.current === version && !pending.signal.aborted) setError("Could not refresh your AI allowance.");
     });
   }, []);
   useEffect(() => {
