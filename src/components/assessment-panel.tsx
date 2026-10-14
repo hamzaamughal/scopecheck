@@ -30,7 +30,7 @@ export default function AssessmentPanel({ scope, state, onGenerate, onLoad, allo
       </>}
       {assessment.context && <p className="context-note"><Icon name="file" size={13}/>{assessment.context.mode === "full"
         ? `Checked the agreed scope and ${assessment.context.documentCount} supporting ${assessment.context.documentCount === 1 ? "document" : "documents"} in full.`
-        : `Checked the agreed scope in full and the ${assessment.context.chunkCount} most relevant sections from ${assessment.context.documentCount} documents (${assessment.context.search === "hybrid" ? "keyword + semantic search" : "keyword search"}).`}</p>}
+        : `Checked the agreed scope in full and the ${assessment.context.chunkCount} most relevant sections from ${assessment.context.documentCount} ${assessment.context.documentCount === 1 ? "document" : "documents"} (${assessment.context.search === "hybrid" ? "keyword + semantic search" : "keyword search"}).`}</p>}
       {assessment.clarificationQuestions.length > 0 && <div className="assessment-questions"><h3>Questions to clarify</h3><ul>{assessment.clarificationQuestions.map((question, index) => <li key={index}>{question}</li>)}</ul></div>}
     </> : <div className="ai-empty"><p>A second opinion on this request.</p><span>Check it against your agreed scope for a suggestion and supporting quotes.</span></div>}
     <div className="assessment-allowance" aria-live="polite">
