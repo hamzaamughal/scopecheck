@@ -34,7 +34,7 @@ try {
   await route.continue();
  });
  await page.goto(base+'/login');
- await page.getByLabel('Email address',{exact:true}).fill(email);
+ await page.getByLabel('Email',{exact:true}).fill(email);
  await page.getByLabel('Password',{exact:true}).fill(password);
  await page.getByRole('button',{name:'Sign in',exact:true}).last().click();
  await page.getByRole('button',{name:'Try again',exact:true}).waitFor();
@@ -91,7 +91,7 @@ try {
  await page.locator('#confirm-password').fill(changedPassword);
  await page.getByRole('button',{name:'Save new password'}).click();
  await page.waitForURL('**/login?reset=1');
- await page.getByLabel('Email address',{exact:true}).fill(email);
+ await page.getByLabel('Email',{exact:true}).fill(email);
  await page.getByLabel('Password',{exact:true}).fill(changedPassword);
  await page.getByRole('button',{name:'Sign in',exact:true}).last().click();
  await page.getByRole('button',{name:'New project',exact:true}).waitFor();
