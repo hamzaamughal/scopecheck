@@ -38,6 +38,8 @@ Add every variable with the **Production** environment only. Preview deployments
 | `OPENAI_API_KEY` | Your key. Set a monthly spend limit in the OpenAI dashboard too. |
 | `ASSESSMENT_DAILY_LIMIT` | Optional, default 10 |
 | `RAG_DAILY_EMBEDDING_TOKENS` | Optional, default 500000 (per user per day; ≈ $0.01 with text-embedding-3-small) |
+| `ADMIN_EMAILS` | Your email(s), comma-separated. Only these accounts can open `/admin` (usage stats). |
+| `STATS_EXCLUDE_EMAILS` | Optional. Extra emails or `@domains` to leave out of `/admin` stats (e.g. friends' test accounts). |
 | `RAG_EMBEDDINGS` | Optional. `off` = keyword search only for supporting documents |
 
 Changing a variable needs a redeploy (Deployments → ⋯ → Redeploy).

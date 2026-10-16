@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
+import { Analytics } from "@vercel/analytics/next";
 import { InlineScript } from "@/components/inline-script";
 import "./globals.css";
 
@@ -21,6 +22,6 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       {/* Apply a saved preference before paint; new visitors start in dark mode. */}
       <InlineScript html={`try{document.documentElement.dataset.theme=localStorage.getItem("scopecheck-theme")==="light"?"light":"dark"}catch(e){}`}/>
     </head>
-    <body>{children}</body>
+    <body>{children}<Analytics/></body>
   </html>;
 }

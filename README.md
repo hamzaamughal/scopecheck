@@ -127,3 +127,8 @@ Checks:
 - `npm run eval:retrieval`: retrieval eval (20 client requests → expected document section) using the production chunker and search SQL in a temporary schema that is rolled back. It reports recall@1/3/5/8 and MRR for keyword-only, vector-only, and hybrid. It runs offline by default. `-- --live` uses real embeddings (well under $0.001).
 
 Known limits: one query embedding per retrieval-mode assessment, counted under the assessment allowance; HNSW is filtered per project after the index scan, which is fine at this scale (pgvector ≥ 0.8 iterative scans would be the next step at large scale).
+
+## Usage tracking
+
+- **Visitors:** Vercel Web Analytics (`<Analytics/>` in `src/app/layout.tsx`). Enable it in Vercel → Project → Analytics. It shows page views, unique visitors, countries, and referrers, uses no cookies, and needs no consent banner.
+- **Sign-ups and usage:** `/admin` is an owner-only page listing real users, sign-ups per day (last 30 days), how far each person got (verified → project → request → AI check → decision), and today's AI usage. Set `ADMIN_EMAILS` (comma-separated) to the emails allowed to open it; anyone else gets a 404. Admin, test (`@example.com`, QA prefixes), and demo accounts are left out of the numbers. Add more with `STATS_EXCLUDE_EMAILS` (exact emails or `@domain`). The page is read-only.
